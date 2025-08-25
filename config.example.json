@@ -27,6 +27,12 @@
       "model": "gpt-4",
       "max_tokens": 1000
     },
+    "ollama": {
+      "base_url": "http://localhost:11434",
+      "model": "llama2",
+      "stream": false,
+      "timeout": 30
+    },
     "alpha_vantage": {
       "api_key": "your_alpha_vantage_api_key"
     },
@@ -114,11 +120,17 @@
     }
   },
   "ai": {
-    "llm_provider": "openai",
-    "model": "gpt-4",
+    "llm_provider": "ollama",
+    "model": "gpt-oss:20b",
     "temperature": 0.7,
     "max_tokens": 1000,
     "enable_sentiment_analysis": true,
-    "enable_strategy_recommendation": true
+    "enable_strategy_recommendation": true,
+    "ollama": {
+      "base_url": "http://10.227.135.97:11434",
+      "model": "gpt-oss:20b",
+      "stream": false,
+      "timeout": 30
+    }
   }
 } 

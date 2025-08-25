@@ -107,11 +107,11 @@ class OpenAIProvider(LLMProvider):
 
 class LocalLLMProvider(LLMProvider):
     """Local LLM provider using transformers"""
-    
+
     def __init__(self, model_name: str = "microsoft/DialoGPT-medium"):
         self.model_name = model_name
         self.logger = logging.getLogger(__name__)
-        
+
         try:
             from transformers import AutoTokenizer, AutoModelForCausalLM
             self.tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -119,12 +119,12 @@ class LocalLLMProvider(LLMProvider):
             self.tokenizer.pad_token = self.tokenizer.eos_token
         except ImportError:
             raise ImportError("Transformers package not installed. Install with: pip install transformers torch")
-    
+
     def generate_response(self, prompt: str, **kwargs) -> LLMResponse:
         """Generate response using local model"""
         try:
             inputs = self.tokenizer.encode(prompt, return_tensors="pt", truncation=True, max_length=512)
-            
+
             with torch.no_grad():
                 outputs = self.model.generate(
                     inputs,
@@ -133,10 +133,10 @@ class LocalLLMProvider(LLMProvider):
                     do_sample=True,
                     pad_token_id=self.tokenizer.eos_token_id
                 )
-            
+
             response_text = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
             response_text = response_text[len(prompt):].strip()
-            
+
             return LLMResponse(
                 content=response_text,
                 confidence=0.6,  # Local models typically have lower confidence
@@ -145,11 +145,11 @@ class LocalLLMProvider(LLMProvider):
                 model_used=self.model_name,
                 tokens_used=len(outputs[0])
             )
-            
+
         except Exception as e:
             self.logger.error(f"Local LLM error: {e}")
             raise
-    
+
     def get_model_info(self) -> Dict[str, Any]:
         """Get local model information"""
         return {
@@ -159,13 +159,146 @@ class LocalLLMProvider(LLMProvider):
             'supports_functions': False
         }
 
+class OllamaProvider(LLMProvider):
+    """Ollama LLM provider for local models"""
+
+    def __init__(self, model: str = "llama2", base_url: str = "http://localhost:11434",
+                 stream: bool = False):
+        self.model = model
+        self.base_url = base_url.rstrip("/")
+        self.stream = stream
+        self.logger = logging.getLogger(__name__)
+
+        try:
+            import requests
+            self.session = requests.Session()
+            self.session.timeout = 30
+        except ImportError:
+            raise ImportError("Requests package not installed. Install with: pip install requests")
+
+    def generate_response(self, prompt: str, **kwargs) -> LLMResponse:
+        """Generate response using Ollama"""
+        try:
+            url = f"{self.base_url}/api/generate"
+
+            data = {
+                "model": self.model,
+                "prompt": prompt,
+                "stream": self.stream,
+                "options": {
+                    "temperature": kwargs.get('temperature', 0.7),
+                    "num_predict": kwargs.get('max_tokens', 1000),
+                    "top_p": kwargs.get('top_p', 0.9),
+                    "top_k": kwargs.get('top_k', 40)
+                }
+            }
+
+            response = self.session.post(url, json=data)
+            response.raise_for_status()
+
+            if self.stream:
+                # Handle streaming response
+                full_content = ""
+                for line in response.iter_lines():
+                    if line:
+                        try:
+                            json_response = json.loads(line)
+                            if 'response' in json_response:
+                                full_content += json_response['response']
+                            if json_response.get('done', False):
+                                break
+                        except json.JSONDecodeError:
+                            continue
+                content = full_content
+            else:
+                # Handle non-streaming response
+                json_response = response.json()
+                content = json_response.get('response', '')
+
+            return LLMResponse(
+                content=content,
+                confidence=0.75,  # Ollama models have good confidence for local use
+                metadata={
+                    'model': self.model,
+                    'base_url': self.base_url,
+                    'eval_count': json_response.get('eval_count', 0),
+                    'eval_duration': json_response.get('eval_duration', 0)
+                },
+                timestamp=datetime.now(),
+                model_used=self.model,
+                tokens_used=json_response.get('eval_count', len(content.split()))
+            )
+
+        except Exception as e:
+            self.logger.error(f"Ollama API error: {e}")
+            raise
+
+    def get_model_info(self) -> Dict[str, Any]:
+        """Get Ollama model information"""
+        try:
+            url = f"{self.base_url}/api/show"
+            response = self.session.post(url, json={"name": self.model})
+            response.raise_for_status()
+            model_info = response.json()
+
+            return {
+                'provider': 'Ollama',
+                'model': self.model,
+                'base_url': self.base_url,
+                'max_tokens': model_info.get('template', {}).get('num_predict', 2048),
+                'supports_functions': False,
+                'model_info': model_info
+            }
+        except Exception as e:
+            self.logger.warning(f"Could not get Ollama model info: {e}")
+            return {
+                'provider': 'Ollama',
+                'model': self.model,
+                'base_url': self.base_url,
+                'max_tokens': 2048,
+                'supports_functions': False
+            }
+
+    def list_available_models(self) -> List[Dict[str, Any]]:
+        """List available models in Ollama"""
+        try:
+            url = f"{self.base_url}/api/list"
+            response = self.session.get(url)
+            response.raise_for_status()
+            return response.json().get('models', [])
+        except Exception as e:
+            self.logger.error(f"Could not list Ollama models: {e}")
+            return []
+
+    def pull_model(self, model_name: str) -> bool:
+        """Pull a model from Ollama"""
+        try:
+            url = f"{self.base_url}/api/pull"
+            response = self.session.post(url, json={"name": model_name}, stream=True)
+
+            for line in response.iter_lines():
+                if line:
+                    try:
+                        status = json.loads(line)
+                        if status.get('status') == 'complete':
+                            return True
+                        elif 'error' in status:
+                            self.logger.error(f"Model pull error: {status['error']}")
+                            return False
+                    except json.JSONDecodeError:
+                        continue
+            return True
+        except Exception as e:
+            self.logger.error(f"Model pull failed: {e}")
+            return False
+
 class LLMIntegration:
     """LangChain + LLM integration for trading system"""
     
-    def __init__(self, provider: str = "openai", api_key: str = None, 
-                 model: str = "gpt-3.5-turbo"):
+    def __init__(self, provider: str = "openai", api_key: str = None,
+                 model: str = "gpt-3.5-turbo", base_url: str = "http://localhost:11434"):
         self.logger = logging.getLogger(__name__)
-        self.provider = self._initialize_provider(provider, api_key, model)
+        self.provider = self._initialize_provider(provider, api_key, model, base_url)
         
         # Initialize LangChain components
         self._init_langchain()
@@ -178,7 +311,8 @@ class LLMIntegration:
             'portfolio_optimization': self._get_portfolio_optimization_prompt()
         }
     
-    def _initialize_provider(self, provider: str, api_key: str, model: str) -> LLMProvider:
+    def _initialize_provider(self, provider: str, api_key: str = None, model: str = "llama2",
+                            base_url: str = "http://localhost:11434") -> LLMProvider:
         """Initialize LLM provider"""
         if provider.lower() == "openai":
             if not api_key:
@@ -186,8 +320,10 @@ class LLMIntegration:
             return OpenAIProvider(api_key, model)
         elif provider.lower() == "local":
             return LocalLLMProvider(model)
+        elif provider.lower() == "ollama":
+            return OllamaProvider(model, base_url)
         else:
-            raise ValueError(f"Unsupported provider: {provider}")
+            raise ValueError(f"Unsupported provider: {provider}. Supported: openai, local, ollama")
     
     def _init_langchain(self):
         """Initialize LangChain components"""

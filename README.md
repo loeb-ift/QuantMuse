@@ -41,7 +41,8 @@ This is a production-ready quantitative trading system that combines traditional
 - **Storage**: SQLite, PostgreSQL, and Redis caching support
 
 ### 🧠 AI & Machine Learning
-- **LLM Integration**: OpenAI GPT for market analysis and insights
+- **LLM Integration**: OpenAI GPT and Ollama for market analysis and insights
+- **Local AI Models**: Ollama support for privacy-focused, local LLM deployment
 - **NLP Processing**: Sentiment analysis of news and social media
 - **ML Models**: XGBoost, Random Forest, Neural Networks
 - **Feature Engineering**: Technical indicators and statistical features
@@ -69,6 +70,11 @@ This is a production-ready quantitative trading system that combines traditional
 - **Streamlit App**: Interactive data science dashboard
 - **Real-time Charts**: K-line charts with technical indicators
 - **Mobile Friendly**: Responsive design for all devices
+
+### ⚡ NEW: AI-Powered Stock Analysis API
+- **Smart Analysis API**: A dedicated FastAPI server that provides stock analysis as a service.
+- **n8n Ready**: Designed for easy integration with workflow automation tools like n8n.
+- **See the full documentation**: [API Documentation](./api/README.md)
 
 ## 🏗️ Architecture
 
@@ -169,6 +175,12 @@ For full functionality, you can add API keys to `config.json`:
   "openai": {
     "api_key": "your_openai_api_key"
   },
+  "ollama": {
+    "base_url": "http://10.227.135.98:11434",
+    "model": "gpt-oss:20b",
+    "stream": false,
+    "timeout": 30
+  },
   "alpha_vantage": {
     "api_key": "your_alpha_vantage_key"
   }
@@ -215,10 +227,19 @@ results = engine.run_backtest(strategy, historical_data)
 ```python
 from data_service.ai import LLMIntegration
 
-# Get AI insights
-llm = LLMIntegration(provider="openai")
+# OpenAI integration
+llm = LLMIntegration(provider="openai", api_key="your-openai-key")
 analysis = llm.analyze_market(factor_data, price_data)
 print(f"AI Recommendation: {analysis.content}")
+
+# Ollama integration (local, no API key required)
+ollama_llm = LLMIntegration(
+    provider="ollama",
+    model="gpt-oss:20b",
+    base_url="http://10.227.135.97:11434"
+)
+local_analysis = ollama_llm.analyze_market(factor_data, price_data)
+print(f"Local AI Recommendation: {local_analysis.content}")
 ```
 
 ## 📚 Documentation
